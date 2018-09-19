@@ -2,55 +2,66 @@ import { Adapter, Config, Contact, start } from "@clinq/bridge";
 import axios from "axios";
 
 interface Candidate {
-  id: string | null;
-  name: string | null;
-  profile_url: string;
-  email: string | null;
-  phone: string | null;
+	id: string | null;
+	name: string | null;
+	profile_url: string;
+	email: string | null;
+	phone: string | null;
 }
 
 interface CandidateResponse {
-  candidates: Candidate[];
-  paging?: {
-    next: string;
-  };
+	candidates: Candidate[];
+	paging?: {
+		next: string;
+	};
 }
 
+const cache = new Map<string, Contact[]>();
+
+const getContacts = async (
+	config: Config,
+	accumulated: Contact[] = [],
+	nextPageUrl?: string
+) => {
+  const url = nextPageUrl || `${config.apiUrl}/spi/v3/candidates`;
+  console.log(url);
+	const result = await axios.get<CandidateResponse>(url, {
+		headers: {
+			Authorization: `Bearer ${config.apiKey}`
+		}
+	});
+
+	const contacts = result.data.candidates
+		.filter(candidate => Boolean(candidate.phone))
+		.map<Contact>(candidate => ({
+			id: candidate.id,
+			name: candidate.name,
+			company: null,
+			email: candidate.email,
+			phoneNumbers: [
+				{
+					label: null,
+					phoneNumber: candidate.phone
+				}
+			],
+			contactUrl: candidate.profile_url,
+			avatarUrl: null
+		}));
+
+	const mergedContacts = [...accumulated, ...contacts];
+
+	if (result.data.paging) {
+		getContacts(config, mergedContacts, result.data.paging.next);
+	} else {
+		cache.set(config.apiKey, mergedContacts);
+	}
+};
+
 class WorkableAdapter implements Adapter {
-  public async getContacts(config: Config): Promise<Contact[]> {
-    const instance = axios.create({
-      baseURL: `${config.apiUrl}/spi/v3`,
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`
-      }
-    });
-
-    // XXX: TODO CLINQ
-    // Docs can be found here: https://workable.readme.io/docs/job-candidates-index
-    // API Key can be found here: https://sipgate.workable.com/backend/account/integrations
-    const result = await instance.get<CandidateResponse>("candidates");
-
-    // TODO Check for result.data.paging and fetch remaining contacts
-    // TODO Format phone numbers???
-    // TODO Caching???
-
-    return result.data.candidates
-      .filter(candidate => !!candidate.phone)
-      .map(candidate => ({
-        id: candidate.id,
-        name: candidate.name,
-        company: null,
-        email: candidate.email,
-        phoneNumbers: [
-          {
-            label: null,
-            phoneNumber: candidate.phone
-          }
-        ],
-        contactUrl: candidate.profile_url,
-        avatarUrl: null
-      }));
-  }
+	public async getContacts(config: Config): Promise<Contact[]> {
+    getContacts(config);
+    return cache.get(config.apiKey) || [];
+	}
 }
 
 start(new WorkableAdapter());
