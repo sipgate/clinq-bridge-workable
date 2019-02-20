@@ -16,13 +16,11 @@ interface CandidateResponse {
 	};
 }
 
-const cache = new Map<string, Contact[]>();
-
 const getContacts = async (
 	config: Config,
 	accumulatedContacts: Contact[] = [],
 	nextPageUrl?: string
-) => {
+): Promise<Contact[]> => {
 	const url = nextPageUrl || `${config.apiUrl}/spi/v3/candidates`;
 	const result = await axios.get<CandidateResponse>(url, {
 		headers: {
@@ -35,7 +33,9 @@ const getContacts = async (
 		.map<Contact>(candidate => ({
 			id: candidate.id,
 			name: candidate.name,
-			company: null,
+			firstName: null,
+			lastName: null,
+			organization: null,
 			email: candidate.email,
 			phoneNumbers: [
 				{
@@ -50,16 +50,15 @@ const getContacts = async (
 	const mergedContacts = [...accumulatedContacts, ...contacts];
 
 	if (result.data.paging) {
-		getContacts(config, mergedContacts, result.data.paging.next);
-	} else {
-		cache.set(config.apiKey, mergedContacts);
+		return getContacts(config, mergedContacts, result.data.paging.next);
 	}
+
+	return mergedContacts;
 };
 
 class WorkableAdapter implements Adapter {
 	public async getContacts(config: Config): Promise<Contact[]> {
-		getContacts(config);
-		return cache.get(config.apiKey) || [];
+		return getContacts(config);
 	}
 }
 
